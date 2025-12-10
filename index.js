@@ -1,157 +1,118 @@
-// index.js - بوت واتساب بسيط يربط Baileys مع OpenAI
-require('dotenv').config();
-const { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } = require('@adiwajshing/baileys');
-const qrcode = require('qrcode-terminal');
-const fs = require('fs-extra');
-const axios = require('axios');
-const moment = require('moment');
+/*
+ BASE 𝟑𝒂𝒔𝒉𝒓𝒚🕷️?
+    
+ # 
+ - DO NOT delete CREDITS 💀
+*/
+require("./database/global")
 
-const OPENAI_KEY = process.env.OPENAI_API_KEY;
-const OWNER = process.env.BOT_OWNER || '';
-const SESSION_DIR = process.env.SESSION_DIR || './auth_info';
-const AI_ENABLED_DEFAULT = (process.env.AI_ENABLED || 'true') === 'true';
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+const func = require("./database/place")
+const readline = require("readline");
+const usePairingCode = true
+const question = (text) => {
+  const rl = readline.createInterface({
+input: process.stdin,
+output: process.stdout
+  });
+  return new Promise((resolve) => {
+rl.question(text, resolve)
+  })
+};
 
-const chatSettingsFile = './chat_settings.json';
-let chatSettings = {};
-if (fs.existsSync(chatSettingsFile)) chatSettings = fs.readJsonSync(chatSettingsFile);
+async function startSesi() {
+const store = makeInMemoryStore({ logger: pino().child({ level: 'silent', stream: 'store' }) })
+const { state, saveCreds } = await useMultiFileAuthState(`./session`)
+const { version, isLatest } = await fetchLatestBaileysVersion()
+    console.log(chalk.red.bold('𝟑𝒂𝒔𝒉𝒓𝒚🕷️ 𝛁4 @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n\nBlackDevil Version 2.0.0\n\nCreated By : ☠︎︎🅁🄰🄺🅄🅉🄰🄽☠︎\nTelegram : @BLACK_DEVIL-OFFICIAL-1\nSubscribe Youtube : @BLACK_DEVIL-OFFICIAL-1'))
+const connectionOptions = {
+version,
+keepAliveIntervalMs: 30000,
+printQRInTerminal: !usePairingCode,
+logger: pino({ level: "fatal" }),
+auth: state,
+browser: [ "Ubuntu", "Chrome", "20.0.04" ]   
+// browser: ['Chrome (Linux)', '', '']
+}
+const zyn = func.makeWASocket(connectionOptions)
+if(usePairingCode && !zyn.authState.creds.registered) {
+		const phoneNumber = await question(chalk.green('\nEnter Your Number\nNumber : '));
+		const code = await zyn.requestPairingCode(phoneNumber.trim())
+		console.log(chalk.green(`Your Pairing Code : ${code} `))
 
-async function saveSettings(){
-  await fs.writeJson(chatSettingsFile, chatSettings, { spaces: 2 });
+	}
+store.bind(zyn.ev)
+
+zyn.ev.on('connection.update', async (update) => {
+const { connection, lastDisconnect } = update
+if (connection === 'close') {
+const reason = new Boom(lastDisconnect?.error)?.output.statusCode
+console.log(color(lastDisconnect.error, 'deeppink'))
+if (lastDisconnect.error == 'Error: Stream Errored (unknown)') {
+process.exit()
+} else if (reason === DisconnectReason.badSession) {
+console.log(color(`Bad Session File, Please Delete Session and Scan Again`))
+process.exit()
+} else if (reason === DisconnectReason.connectionClosed) {
+console.log(color('[SYSTEM]', 'white'), color('Connection closed, reconnecting...', 'deeppink'))
+process.exit()
+} else if (reason === DisconnectReason.connectionLost) {
+console.log(color('[SYSTEM]', 'white'), color('Connection lost, trying to reconnect', 'deeppink'))
+process.exit()
+} else if (reason === DisconnectReason.connectionReplaced) {
+console.log(color('Connection Replaced, Another New Session Opened, Please Close Current Session First'))
+zyn.logout()
+} else if (reason === DisconnectReason.loggedOut) {
+console.log(color(`Device Logged Out, Please Scan Again And Run.`))
+zyn.logout()
+} else if (reason === DisconnectReason.restartRequired) {
+console.log(color('Restart Required, Restarting...'))
+await startSesi()
+} else if (reason === DisconnectReason.timedOut) {
+console.log(color('Connection TimedOut, Reconnecting...'))
+startSesi()
+}
+} else if (connection === "connecting") {
+start(`1`, `Connecting...`)
+} else if (connection === "open") {
+success(`1`, `CONNECTED`)
+zyn.sendMessage(`201503414790@s.whatsapp.net`, { text: `\`𝗛𝗶 𝗗𝗲𝘃𝗲𝗹𝗼𝗽𝗲𝗿\`
+  𝟑𝒂𝒔𝒉𝒓𝒚🕷️ 𝛁4  IS CONNECTED 🔥 `})
+if (autoJoin) {
+zyn.groupAcceptInvite(codeInvite)
+}
+}
+})
+
+zyn.ev.on('messages.upsert', async (chatUpdate) => {
+try {
+m = chatUpdate.messages[0]
+if (!m.message) return
+m.message = (Object.keys(m.message)[0] === 'ephemeralMessage') ? m.message.ephemeralMessage.message : m.message
+if (m.key && m.key.remoteJid === 'status@broadcast') return zyn.readMessages([m.key])
+if (!zyn.public && !m.key.fromMe && chatUpdate.type === 'notify') return
+if (m.key.id.startsWith('BAE5') && m.key.id.length === 16) return
+m = func.smsg(zyn, m, store)
+require("./rakuzan")(zyn, m, store)
+} catch (err) {
+console.log(err)
+}
+})
+
+zyn.ev.on('contacts.update', (update) => {
+for (let contact of update) {
+let id = zyn.decodeJid(contact.id)
+if (store && store.contacts) store.contacts[id] = { id, name: contact.notify }
+}
+})
+
+zyn.public = true
+
+zyn.ev.on('creds.update', saveCreds)
+return zyn
 }
 
-async function callOpenAI(system, userMessages){
-  if(!OPENAI_KEY) return 'خطأ: مفتاح OpenAI غير مضبوط في متغيرات البيئة.';
-  try{
-    const payload = {
-      model: OPENAI_MODEL,
-      messages: [
-        { role: 'system', content: system || 'You are a helpful assistant.' },
-        ...userMessages
-      ],
-      max_tokens: 800,
-      temperature: 0.7
-    };
-    const res = await axios.post('https://api.openai.com/v1/chat/completions', payload, {
-      headers: { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' }
-    });
-    const reply = res.data.choices && res.data.choices[0].message.content;
-    return reply || 'لم أستطع توليد ردّ الآن.';
-  }catch(err){
-    console.error('OpenAI error', err?.response?.data || err.message);
-    return 'حدث خطأ عند التواصل مع خدمة الذكاء الاصطناعي.';
-  }
-}
+startSesi()
 
-(async ()=>{
-  await fs.ensureDir(SESSION_DIR);
-  const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
-  const { version } = await fetchLatestBaileysVersion();
-
-  const sock = makeWASocket({
-    version,
-    auth: state,
-    printQRInTerminal: true
-  });
-
-  sock.ev.on('creds.update', saveCreds);
-
-  sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect, qr } = update;
-    if(qr){
-      qrcode.generate(qr, { small: true });
-      console.log('امسح رمز QR من واتساب لتوصيل البوت');
-    }
-    if(connection === 'close'){
-      const reason = (lastDisconnect || {}).error?.output?.statusCode;
-      console.log('Connection closed, reason:', lastDisconnect?.error?.toString());
-    }
-    if(connection === 'open'){
-      console.log('🔌 البوت متصل الآن');
-    }
-  });
-
-  sock.ev.on('messages.upsert', async m => {
-    try{
-      const msg = m.messages[0];
-      if(!msg || msg.key?.remoteJid === 'status@broadcast') return;
-      if(msg.key.fromMe) return; // تجاهل الرسائل الصادرة من نفس الجلسة
-
-      const jid = msg.key.remoteJid;
-      const from = jid.split('@')[0];
-      const pushname = msg.pushName || 'مستخدم';
-
-      // نص الرسالة
-      const text = (msg.message?.conversation) || (msg.message?.extendedTextMessage?.text) || '';
-      console.log(`[${moment().format('YYYY-MM-DD HH:mm:ss')}] ${pushname} (${jid}): ${text}`);
-
-      // إعدادات الدردشة افتراضيًا
-      if(!chatSettings[jid]) chatSettings[jid] = { aiEnabled: AI_ENABLED_DEFAULT, welcome: '' };
-
-      // أوامر الإدارة (تبدأ بشرطة مائلة)
-      if(text.startsWith('/')){
-        const parts = text.trim().split(' ');
-        const cmd = parts[0].toLowerCase();
-        const arg = parts.slice(1).join(' ');
-
-        // فقط صاحب البوت يمكنه تنفيذ أوامر المدير
-        if(cmd === '/help'){
-          await sock.sendMessage(jid, { text: 'أوامر متاحة:\n/help - مساعدة\n/ai on - تفعيل AI للمحادثة\n/ai off - إيقاف AI للمحادثة\n/setwelcome <نص> - تعيين رسالة ترحيب\n/clearwelcome - حذف رسالة الترحيب' });
-        }
-        else if(cmd === '/ai'){
-          if(from !== OWNER.replace('+','')){
-            await sock.sendMessage(jid, { text: 'فشل: هذا الأمر مقصور على صاحب البوت.' });
-          } else {
-            if(arg === 'on') chatSettings[jid].aiEnabled = true;
-            else if(arg === 'off') chatSettings[jid].aiEnabled = false;
-            await saveSettings();
-            await sock.sendMessage(jid, { text: `تم تعيين AI للمحادثة: ${chatSettings[jid].aiEnabled ? 'مفعل' : 'موقوف'}` });
-          }
-        }
-        else if(cmd === '/setwelcome'){
-          if(from !== OWNER.replace('+','')){
-            await sock.sendMessage(jid, { text: 'فشل: هذا الأمر مقصور على صاحب البوت.' });
-          } else {
-            chatSettings[jid].welcome = arg;
-            await saveSettings();
-            await sock.sendMessage(jid, { text: 'تم تعيين رسالة الترحيب.' });
-          }
-        }
-        else if(cmd === '/clearwelcome'){
-          if(from !== OWNER.replace('+','')){
-            await sock.sendMessage(jid, { text: 'فشل: هذا الأمر مقصور على صاحب البوت.' });
-          } else {
-            chatSettings[jid].welcome = '';
-            await saveSettings();
-            await sock.sendMessage(jid, { text: 'تم حذف رسالة الترحيب.' });
-          }
-        }
-        return;
-      }
-
-      // إرسال ترحيب إذا معرّف
-      if(chatSettings[jid].welcome && text.toLowerCase().includes('مرحبا')){
-        await sock.sendMessage(jid, { text: chatSettings[jid].welcome });
-        return;
-      }
-
-      // إذا AI مفعل في هذه المحادثة، استدعِ OpenAI
-      if(chatSettings[jid].aiEnabled){
-        // تكوين رسائل الإدخال للـ OpenAI
-        const system = 'أنت مساعد ودود ومتجاوب، تحدث بالعربية عند الحاجة.';
-        const userMessages = [{ role: 'user', content: text }];
-
-        const reply = await callOpenAI(system, userMessages);
-        await sock.sendMessage(jid, { text: reply });
-        return;
-      }
-
-      // إن لم يكن AI مفعلًا، يمكن للبوت الرد برسالة افتراضية
-      await sock.sendMessage(jid, { text: 'البوت جاهز — لكن AI موقوف في هذه المحادثة. اطلب /help للأوامر.' });
-
-    }catch(e){
-      console.error('processing message error', e);
-    }
-  });
-
-})();
+process.on('uncaughtException', function (err) {
+    console.log('Caught exception: ', err)
+})
